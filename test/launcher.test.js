@@ -34,6 +34,25 @@ test('make-shortcut.ps1 keeps its UTF-8 BOM', () => {
     'and the default name should survive as real UTF-8');
 });
 
+test('the launcher puts a shortcut on the desktop by itself', () => {
+  // Nobody should have to go looking for tools/make-shortcut.ps1, so the first
+  // launch does it. It must stay best-effort and Windows-only.
+  const launcher = fs.readFileSync(new URL('../tools/launch.mjs', import.meta.url), 'utf8');
+  assert.ok(launcher.includes('ensureDesktopShortcut()'), 'the launcher should call it');
+  assert.ok(launcher.includes("'make-shortcut.ps1'"), 'and delegate to the tested script');
+  assert.ok(launcher.includes("process.platform !== 'win32'"), 'and do nothing off Windows');
+  assert.ok(launcher.includes('catch'), 'and never let a missing icon stop the console');
+});
+
+test('the shortcut script leaves an existing, correct shortcut alone', () => {
+  // start.cmd calls this on every launch where the icon is missing. Recreating
+  // blindly would clobber a shortcut the user renamed by hand.
+  const script = read('tools/make-shortcut.ps1').toString('utf8');
+  assert.ok(script.includes('Test-Path $linkPath'), 'it should check for an existing shortcut');
+  assert.ok(script.includes('$current.TargetPath -eq $target'), 'and compare where it points');
+  assert.ok(script.includes('exit 0'), 'and stop rather than rewrite when it already matches');
+});
+
 test('the console can fall back to the next port instead of dying', () => {
   // Double-clicking the launcher twice is normal; the second click used to fail
   // with EADDRINUSE and the window closed. An explicit --port is still honoured.

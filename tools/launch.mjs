@@ -16,6 +16,41 @@ const say = (line = '') => process.stdout.write(line + String.fromCharCode(10));
 // Set from here rather than from the .cmd, so the Chinese name survives.
 process.title = 'B站清理助手';
 
+/**
+ * Put a shortcut on the desktop the first time this runs.
+ *
+ * Nobody should have to go digging for tools/make-shortcut.ps1, and a desktop
+ * icon is what makes the tool feel installed rather than unpacked. Best effort
+ * throughout: a machine without PowerShell still gets a working console.
+ */
+function ensureDesktopShortcut() {
+  if (process.platform !== 'win32') return;
+
+  const name = 'B站清理助手.lnk';
+  const desktops = [
+    process.env.USERPROFILE && path.join(process.env.USERPROFILE, 'Desktop'),
+    process.env.OneDrive && path.join(process.env.OneDrive, 'Desktop'),
+    process.env.OneDriveConsumer && path.join(process.env.OneDriveConsumer, 'Desktop'),
+  ].filter(Boolean);
+
+  // The desktop can be redirected somewhere unguessable, so this is only a
+  // cheap "probably already done" test. The script resolves the real folder and
+  // leaves an existing, correct shortcut alone.
+  if (desktops.some((dir) => fs.existsSync(path.join(dir, name)))) return;
+
+  const script = path.join(root, 'tools', 'make-shortcut.ps1');
+  if (!fs.existsSync(script)) return;
+
+  try {
+    spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], {
+      cwd: root,
+      stdio: 'inherit',
+    });
+  } catch {
+    say('  （桌面快捷方式没建成，不影响使用）');
+  }
+}
+
 // `import.meta.dirname` already requires 20.11, but say so plainly if someone
 // runs an older Node that got this far.
 const [major, minor] = process.versions.node.split('.').map(Number);
@@ -48,6 +83,7 @@ if (!fs.existsSync(path.join(root, 'node_modules', 'qrcode'))) {
 
 say('  B站清理助手');
 say('  ----------------------------------------');
+ensureDesktopShortcut();
 say('  正在启动，浏览器会自动打开。');
 say('  用完之后，直接关掉这个窗口就停止了。');
 say();
