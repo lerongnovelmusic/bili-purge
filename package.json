@@ -4,6 +4,14 @@
   "type": "module",
   "description": "按比例、按新鲜度抽样的 B 站批量取关 / 收藏夹清理工具，带本地 Web 控制台和每日自动运行",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lerongnovelmusic/bili-purge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lerongnovelmusic/bili-purge/issues"
+  },
+  "homepage": "https://github.com/lerongnovelmusic/bili-purge#readme",
   "engines": {
     "node": ">=20.11.0"
   },
