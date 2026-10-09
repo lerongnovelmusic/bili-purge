@@ -21,6 +21,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import QRCode from 'qrcode';
 
@@ -668,13 +669,57 @@ function page(token) {
   return html.replace('__SESSION_TOKEN__', token);
 }
 
+/**
+ * Bind `start`, or the next free port if that one is taken.
+ *
+ * Double-clicking the launcher twice is normal, and the second click used to die
+ * with EADDRINUSE. Walking forward a few ports means the second window simply
+ * gets its own console instead.
+ */
+function listenFrom(server, start, tries) {
+  return new Promise((resolve, reject) => {
+    let attempt = 0;
+    const onError = (error) => {
+      if (error.code === 'EADDRINUSE' && attempt < tries) {
+        attempt += 1;
+        server.listen(start + attempt, '127.0.0.1');
+        return;
+      }
+      server.off('error', onError);
+      reject(error);
+    };
+    server.on('error', onError);
+    server.listen(start, '127.0.0.1', () => {
+      server.off('error', onError);
+      resolve(server.address().port);
+    });
+  });
+}
+
+/** Hand the URL to the desktop. Failure here is not a reason to refuse to serve. */
+function openInBrowser(url) {
+  const [command, args] = process.platform === 'win32'
+    ? ['cmd', ['/c', 'start', '', url]]
+    : process.platform === 'darwin'
+      ? ['open', [url]]
+      : ['xdg-open', [url]];
+  try {
+    spawn(command, args, { detached: true, stdio: 'ignore' }).unref();
+  } catch {
+    // The URL is printed either way.
+  }
+}
+
 async function main() {
-  const portArg = process.argv.slice(2).find((arg) => arg.startsWith('--port='));
-  const port = portArg ? Number(portArg.slice('--port='.length)) : DEFAULT_PORT;
-  if (!Number.isFinite(port) || port <= 0 || port > 65535) throw new RangeError('--port must be a valid port');
+  const args = process.argv.slice(2);
+  const portArg = args.find((arg) => arg.startsWith('--port='));
+  const requested = portArg ? Number(portArg.slice('--port='.length)) : DEFAULT_PORT;
+  if (!Number.isFinite(requested) || requested <= 0 || requested > 65535) {
+    throw new RangeError('--port must be a valid port');
+  }
 
   const server = http.createServer((req, res) => {
-    const url = new URL(req.url, `http://127.0.0.1:${port}`);
+    const url = new URL(req.url, `http://127.0.0.1:${server.address().port}`);
     handle(req, res, url).catch((error) => {
       try {
         json(res, 500, { error: String(error?.message ?? error) });
@@ -684,10 +729,12 @@ async function main() {
     });
   });
 
-  await new Promise((resolve) => { server.listen(port, '127.0.0.1', resolve); });
-  const actual = server.address().port;
-  console.log(`bili-purge control panel: http://127.0.0.1:${actual}`);
+  // An explicit --port is a promise, so honour it and let a clash fail loudly.
+  const actual = await listenFrom(server, requested, portArg ? 0 : 10);
+  const url = `http://127.0.0.1:${actual}`;
+  console.log(`bili-purge control panel: ${url}`);
   console.log('bound to 127.0.0.1 only; press Ctrl+C to stop.');
+  if (args.includes('--open')) openInBrowser(url);
 }
 
 runMain(import.meta.url, main);
