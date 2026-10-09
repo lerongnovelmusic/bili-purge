@@ -1,0 +1,11 @@
+# Keep one canonical form in the repository. Windows still checks out working
+# files fine; this just stops every commit from re-writing line endings.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.avif binary
+*.ico binary

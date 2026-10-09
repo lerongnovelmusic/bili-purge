@@ -1,0 +1,30 @@
+{
+  "name": "bili-purge",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "按比例、按新鲜度抽样的 B 站批量取关 / 收藏夹清理工具，带本地 Web 控制台和每日自动运行",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "keywords": [
+    "bilibili",
+    "unfollow",
+    "favorites",
+    "cleanup",
+    "cli",
+    "gui"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "gui": "node gui.js",
+    "demo": "node demo.js",
+    "snapshot": "node fetch-snapshot.js",
+    "check": "node fetch-snapshot.js --check",
+    "daily": "node daily.js",
+    "daily:dry": "node daily.js --dry"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  }
+}

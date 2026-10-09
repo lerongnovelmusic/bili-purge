@@ -1,0 +1,13 @@
+node_modules/
+snapshots/
+logs/
+.secrets/
+credentials.json
+*.local.json
+
+# A background you uploaded or generated is yours, and may be artwork you have no
+# right to redistribute. Only the original, hand-drawn backdrop.svg ships.
+gui/assets/background.*
+
+# Preview output: real follows, real names, real favourites.
+review-*.txt

@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>bili-purge 控制台</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --line: #2b3039; --ink: #e6e8ec;
+    --dim: #9aa3b0; --accent: #4a9eff; --ok: #3ecf8e; --warn: #e8b84b; --bad: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.55 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  /* The artwork sits behind everything, and the panels stay opaque so contrast
+     never depends on whatever image is underneath. */
+  #bg {
+    position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background-position: center; background-size: cover; background-repeat: no-repeat;
+  }
+  header button { margin-left: auto; padding: 5px 11px; font-size: 12px; }
+  .filebtn {
+    display: inline-block; background: #262b34; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 11px;
+    font-size: 12px; cursor: pointer;
+  }
+  .filebtn:hover { background: #2f3540; }
+
+  /* Crop picker. The frame below is exactly the shape of the finished
+     background, so the user frames it by dragging instead of guessing numbers. */
+  #cropModal {
+    position: fixed; inset: 0; z-index: 60; padding: 20px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(6, 8, 12, .8);
+  }
+  #cropModal[hidden] { display: none; }
+  .cropCard {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px; width: 100%; max-width: 800px;
+  }
+  .cropCard h3 { margin: 0 0 4px; font-size: 15px; }
+  .cropCard p.hint { margin: 0 0 12px; color: var(--dim); font-size: 12px; }
+  #cropView {
+    display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 8px;
+    background: #0b0d11; cursor: grab; touch-action: none;
+  }
+  #cropView.dragging { cursor: grabbing; }
+  .cropZoom { display: flex; align-items: center; gap: 10px; margin: 14px 0 0; font-size: 13px; color: var(--dim); }
+  .cropZoom input { flex: 1; min-width: 0; }
+  .cropActions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+  #cropNote { margin-top: 10px; min-height: 17px; font-size: 12px; color: var(--dim); }
+  #cropNote.bad { color: var(--bad); }
+  header {
+    padding: 18px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  }
+  h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--dim); font-size: 12px; }
+  main {
+    padding: 20px 24px 60px; max-width: 1560px; margin: 0 auto;
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 18px; align-items: start;
+  }
+  main > #boot { grid-column: 1 / -1; }
+  .col { display: flex; flex-direction: column; min-width: 0; }
+  .col > section:last-child { margin-bottom: 0; }
+  .card {
+    border: 1px solid var(--line); border-radius: 8px; padding: 14px;
+    margin-bottom: 14px; background: #191d24;
+  }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: minmax(0, 1fr); max-width: 1080px; }
+  }
+  section {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px 18px; margin-bottom: 16px;
+  }
+  section > h2 {
+    font-size: 14px; margin: 0 0 4px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  section > p.hint { color: var(--dim); font-size: 12px; margin: 0 0 14px; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 12px; color: var(--dim); }
+  input[type=text], input[type=number], input[type=password], input[type=time], select, textarea {
+    background: #0f1116; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 13px; min-width: 90px;
+  }
+  textarea { width: 100%; min-height: 74px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  input[type=number] { width: 110px; }
+  button {
+    background: #262b34; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px 14px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  button:hover { background: #2f3540; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #06101d; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.1); }
+  button.danger { background: #3a2226; border-color: #5c2f36; color: #ffb4b4; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; border: 1px solid var(--line); color: var(--dim);
+  }
+  .pill.ok { color: var(--ok); border-color: #235c43; background: #16261f; }
+  .pill.bad { color: var(--bad); border-color: #5c2f36; background: #261618; }
+  .pill.warn { color: var(--warn); border-color: #5c4a1f; background: #262115; }
+  pre {
+    background: #0f1116; border: 1px solid var(--line); border-radius: 6px;
+    padding: 12px; overflow: auto; max-height: 340px; font-size: 12px; margin: 0;
+    font-family: ui-monospace, Consolas, monospace; white-space: pre;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 500; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .note { font-size: 12px; color: var(--dim); margin-top: 8px; }
+  .banner {
+    border-radius: 6px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px;
+    border: 1px solid var(--line); background: #191d24;
+  }
+  .banner.warn { border-color: #5c4a1f; background: #211c11; color: #f0d9a0; }
+  .banner.bad { border-color: #5c2f36; background: #211315; color: #ffc0c0; }
+  .banner.ok { border-color: #235c43; background: #12211a; color: #a8e9cb; }
+  code { background: #0f1116; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+  .token { font-family: ui-monospace, Consolas, monospace; font-size: 15px; letter-spacing: 1px; color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<div id="cropModal" hidden>
+  <div class="cropCard">
+    <h3>选取背景范围</h3>
+    <p class="hint">拖动图片决定显示哪一块，滑块决定放大多少。框住的这一块就是最终的背景。</p>
+    <canvas id="cropView" width="1280" height="720"></canvas>
+    <label class="cropZoom">缩放
+      <input id="cropZoom" type="range" min="1" max="4" step="0.01" value="1">
+    </label>
+    <div class="cropActions">
+      <button id="cropCancel" type="button">取消</button>
+      <button id="cropApply" type="button" class="primary">用这一块</button>
+    </div>
+    <div id="cropNote"></div>
+  </div>
+</div>
+<header>
+  <h1>bili-purge 控制台</h1>
+  <span class="sub">只监听 127.0.0.1 · 每一步都先预览再执行</span>
+  <span id="credPill" class="pill">凭据未知</span>
+  <button id="bgToggle" type="button">背景</button>
+  <label class="filebtn"><span id="bgFileLabel">上传背景</span>
+    <input id="bgFile" type="file" accept="image/png,image/jpeg,image/webp,image/avif,image/gif" hidden></label>
+  <button id="bgReset" type="button">恢复默认</button>
+</header>
+
+<main>
+  <div id="boot" class="banner">正在加载…</div>
+
+  <div class="col">
+  <!-- ------------------------------------------------------ credentials -->
+  <section>
+    <h2>1. 账号凭据</h2>
+    <p class="hint">
+      <b>扫码登录最省事</b>：和在新设备上登录一样，手机 B站 App 扫一下就行，全程不碰 Cookie。
+      不想扫码，也可以整段粘贴 Cookie / cURL，脚本会自己挑出需要的两个值。
+    </p>
+    <div id="credBody"></div>
+
+    <div class="row" style="margin-top:12px; align-items:flex-start">
+      <div class="field">
+        <label>&nbsp;</label>
+        <button id="qrStart" class="primary">扫码登录</button>
+      </div>
+      <div id="qrBox" style="display:none">
+        <div id="qrImage" style="background:#fff; padding:8px; border-radius:8px; line-height:0"></div>
+        <div id="qrStatus" class="note" style="max-width:250px">用 B站 App 扫描这个二维码。</div>
+      </div>
+      <div class="field" style="flex:1; min-width:260px">
+        <label>或者：粘贴 Cookie / cURL（F12 → Network → 任意请求 → 右键 Copy as cURL）</label>
+        <textarea id="credBlob" placeholder="SESSDATA=...; bili_jct=...; DedeUserID=..."></textarea>
+      </div>
+    </div>
+    <div class="row">
+      <button id="saveBlob" class="primary">保存粘贴的凭据</button>
+      <button id="verifyCred">验证登录并读取关注数</button>
+      <button id="clearCred" class="danger">清除凭据</button>
+    </div>
+    <div id="credMsg" class="note"></div>
+
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer; color:var(--dim); font-size:12px">为什么不能"复制网址"？怎么手动找 Cookie？（点开）</summary>
+      <div class="note" style="line-height:1.8">
+        <b>SESSDATA 和 bili_jct 是 HttpOnly Cookie</b>：网页脚本读不到，它们也
+        <b>永远不会出现在网址里</b>。所以复制地址栏拿不到登录态——这是浏览器安全模型决定的，
+        不是实现问题。要么扫码，要么从 Cookie 里取。<br><br>
+        手动取：<br>
+        1. 在浏览器里正常登录 bilibili.com<br>
+        2. 按 <code>F12</code>，切到 <code>Network</code>（网络）<br>
+        3. 刷新页面，点列表里任意一个请求<br>
+        4. 右键它 → <code>Copy</code> → <code>Copy as cURL</code>，把整段粘到上面<br>
+        5. 或找 <code>Request Headers</code> → <code>Cookie</code> 整行复制<br>
+        粘贴内容里多余的 Cookie 会被丢弃，只保存 SESSDATA 和 bili_jct。
+      </div>
+    </details>
+  </section>
+
+  <!-- ---------------------------------------------------------- unfollow -->
+  <section>
+    <h2>2. 取关 <span id="ufPill" class="pill"></span></h2>
+    <p class="hint">相对标尺取最年轻的 30% 为"新鲜"，越老越可能被取关；特别关注与互关永不取关。</p>
+    <div class="row">
+      <div class="field"><label>每日上限</label><input type="number" id="ufDaily" min="0"></div>
+      <div class="field"><label>单轮上限</label><input type="number" id="ufPerRun" min="1"></div>
+      <div class="field"><label>fresh 绝对上限（天）</label><input type="number" id="ufCap" min="1"></div>
+      <div class="field"><label>启用</label><select id="ufEnabled"><option value="true">开</option><option value="false">关</option></select></div>
+    </div>
+    <div class="row">
+      <div class="field" style="flex:1; min-width:280px">
+        <label>白名单 UP（每行一个 mid，或逗号分隔）</label>
+        <textarea id="ufWhitelist" placeholder="20165629&#10;1935882"></textarea>
+      </div>
+    </div>
+    <div id="ufSnap" class="note"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="saveUf">保存取关设置</button>
+      <button id="planUf" class="primary">预览取关计划</button>
+    </div>
+  </section>
+
+  <!-- --------------------------------------------------------- favorites -->
+  <section>
+    <h2>3. 收藏夹清理 <span id="favPill" class="pill"></span></h2>
+    <p class="hint">删除可撤销（<code>restore-favorites.js</code> 能把 aid 加回去），所以配额比取关宽。</p>
+    <div class="row">
+      <div class="field">
+        <label>收藏夹</label>
+        <select id="favFolder" style="min-width:240px"></select>
+      </div>
+      <div class="field"><label>每日上限</label><input type="number" id="favDaily" min="0"></div>
+      <div class="field"><label>单轮上限</label><input type="number" id="favPerRun" min="1"></div>
+      <div class="field"><label>fresh 绝对上限（天）</label><input type="number" id="favCap" min="1"></div>
+      <div class="field"><label>启用</label><select id="favEnabled"><option value="false">关</option><option value="true">开</option></select></div>
+    </div>
+    <div class="row">
+      <div class="field" style="flex:1; min-width:280px">
+        <label>白名单视频（每行一个 aid / bvid，或逗号分隔）</label>
+        <textarea id="favWhitelist"></textarea>
+      </div>
+    </div>
+    <div id="favSnap" class="note"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="saveFav">保存收藏夹设置</button>
+      <button id="planFav" class="primary">预览收藏夹计划</button>
+      <button id="refreshFolders">从 B站 刷新收藏夹列表</button>
+    </div>
+  </section>
+
+  </div>
+
+  <div class="col">
+  <!-- ------------------------------------------------------------ preview -->
+  <section>
+    <h2>4. 预览与执行</h2>
+    <p class="hint">执行必须用预览时生成的一次性令牌。计划变了令牌就变，所以确认的就是你看到的这一份。
+      两个计划可以同时预览，然后一次性都执行。</p>
+    <div id="planOut"><div class="note">先点上面的「预览」。</div></div>
+  </section>
+
+  <!-- ----------------------------------------------------------- schedule -->
+  <section>
+    <h2>5. 每天自动跑一次</h2>
+    <p class="hint">
+      用 Windows 任务计划程序，不需要留着这个页面或任何进程。
+    </p>
+    <div id="taskBody"></div>
+    <div class="row" style="margin-top:10px">
+      <div class="field"><label>每天几点</label><input type="time" id="taskTime" value="03:30"></div>
+      <button id="installTask">安装每日任务</button>
+      <button id="removeTask" class="danger">删除每日任务</button>
+    </div>
+    <div class="banner warn" style="margin-top:12px">
+      <b>自动运行的三个真实限制：</b><br>
+      1. 定时任务无人值守，所以用不了确认令牌——<b>安装这个任务本身就是授权</b>。<br>
+      2. 它每次会自动重抓快照，否则计划会基于过期数据。<br>
+      3. <b>Cookie 会过期</b>（通常约一个月）。过期后该次运行会在日志里明确报错，
+      不会静默什么都不做，但需要你回来重新粘贴凭据。
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------ history -->
+  <section>
+    <h2>6. 最近运行与配额</h2>
+    <div id="historyBody"></div>
+  </section>
+  </div>
+</main>
+
+<script>
+const TOKEN = '__SESSION_TOKEN__';
+const $ = (id) => document.getElementById(id);
+let STATE = null;
+
+// The background is a display preference, so it lives in the browser rather
+// than in the settings file the scripts read.
+const BG_KEY = 'bili-purge.background';
+
+function applyBackground() {
+  const on = localStorage.getItem(BG_KEY) !== 'off';
+  const url = STATE && STATE.background;
+  $('bg').style.backgroundImage = on && url ? 'url("' + url + '")' : 'none';
+  $('bgToggle').textContent = '背景：' + (on ? '开' : '关');
+  $('bgToggle').title = url
+    ? (on ? '当前 ' + url + '，点一下关闭' : '点击打开背景')
+    : '没有可用的背景图片';
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: { 'x-bili-purge-token': TOKEN, 'Content-Type': 'application/json', ...(options.headers || {}) },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+  return body;
+}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const linesToIds = (text) => String(text || '').split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+const idsToLines = (list) => (list || []).join(String.fromCharCode(10));
+
+function pill(el, text, kind) {
+  el.textContent = text;
+  el.className = 'pill' + (kind ? ' ' + kind : '');
+}
+
+function render(state) {
+  STATE = state;
+  applyBackground();
+  const cred = state.credentials;
+  pill($('credPill'),
+    cred.ok ? (cred.writable ? '凭据可用（可执行写操作）' : '凭据可用（缺 bili_jct）') : '凭据不可用',
+    cred.ok ? (cred.writable ? 'ok' : 'warn') : 'bad');
+
+  const problems = (cred.problems || []).map((p) => '<div>' + esc(p) + '</div>').join('');
+  $('credBody').innerHTML =
+    (cred.ok ? '' : '<div class="banner bad">' + problems + '</div>') +
+    (cred.lines || []).map((line) => '<div class="note" style="margin:0">' + esc(line) + '</div>').join('') +
+    (cred.file ? '' : '');
+
+  // unfollow
+  const uf = state.settings.unfollow;
+  $('ufDaily').value = uf.dailyCap;
+  $('ufPerRun').value = uf.perRun;
+  $('ufCap').value = uf.freshCapDays;
+  $('ufEnabled').value = String(uf.enabled);
+  $('ufWhitelist').value = idsToLines(uf.whitelist);
+  pill($('ufPill'), uf.whitelist.length + ' 个白名单', uf.whitelist.length ? 'ok' : '');
+  $('ufSnap').innerHTML = state.followings
+    ? '快照：' + esc(state.followings.file) + ' · ' + state.followings.fetched + ' 个关注 · '
+      + (state.followings.complete ? '<span class="pill ok">完整</span>' : '<span class="pill warn">不完整</span>')
+    : '<span class="pill warn">还没有关注快照，先跑 fetch-snapshot.js --followings</span>';
+
+  // favorites
+  const fav = state.settings.favorites;
+  $('favDaily').value = fav.dailyCap;
+  $('favPerRun').value = fav.perRun;
+  $('favCap').value = fav.freshCapDays;
+  $('favEnabled').value = String(fav.enabled);
+  $('favWhitelist').value = idsToLines(fav.whitelist);
+  pill($('favPill'), fav.whitelist.length + ' 个白名单', fav.whitelist.length ? 'ok' : '');
+
+  const folderSelect = $('favFolder');
+  const folders = state.favorites.folders || [];
+  if (folders.length === 0) {
+    folderSelect.innerHTML = '<option value="">（先执行 --folders 抓取列表）</option>';
+  } else {
+    folderSelect.innerHTML = folders.map((f) =>
+      '<option value="' + esc(f.mediaId) + '"' + (String(f.mediaId) === String(fav.folderId) ? ' selected' : '') + '>'
+      + esc(f.title) + ' (' + f.count + ')' + (f.isDefault ? ' [默认]' : '') + '</option>').join('');
+  }
+  const snap = state.favorites.snapshot;
+  $('favSnap').innerHTML = snap
+    ? '快照：' + esc(snap.title) + ' · ' + snap.fetched + ' 条 · 标为失效 ' + (snap.invalidCount ?? '?')
+      + (snap.incomplete ? ' <span class="pill warn">不完整：API 报 ' + snap.reportedCount + '</span>' : '')
+    : '<span class="pill warn">还没有收藏夹快照，先跑 fetch-snapshot.js --folder &lt;mediaId&gt;</span>';
+
+  // schedule
+  const task = state.task || {};
+  $('taskTime').value = state.settings.schedule.time || '03:30';
+  $('taskBody').innerHTML = task.installed
+    ? '<div class="banner ok">已安装：<code>' + esc(task.taskName) + '</code>'
+      + (task.nextRunTime ? ' · 下次运行 ' + esc(task.nextRunTime) : '')
+      + (task.lastResult ? ' · 上次结果 ' + esc(task.lastResult) : '') + '</div>'
+    : '<div class="banner">未安装。安装后每天在指定时间自动跑一次。</div>';
+
+  // history
+  const usage = state.usage || [];
+  const history = state.history || [];
+  $('historyBody').innerHTML =
+    '<table><thead><tr><th>日期</th><th class="num">取关</th></tr></thead><tbody>'
+    + usage.map((u) => '<tr><td>' + esc(u.date) + (u.today ? ' <span class="pill">今天</span>' : '')
+      + '</td><td class="num">' + u.count + '</td></tr>').join('')
+    + '</tbody></table>'
+    + (history.length
+      ? '<table style="margin-top:14px"><thead><tr><th>时间</th><th>类型</th><th>来源</th>'
+        + '<th class="num">成功</th><th class="num">失败</th><th>状态</th></tr></thead><tbody>'
+        + history.map((h) => '<tr><td>' + esc((h.startedAt || '').replace('T', ' ').slice(0, 19))
+          + '</td><td>' + esc(h.action === 'favorites' ? '收藏夹' : '取关')
+          + '</td><td>' + esc(h.source) + '</td>'
+          + '<td class="num">' + (h.ok ?? '?') + '</td><td class="num">' + (h.failed ?? '?') + '</td>'
+          + '<td>' + (h.aborted ? '<span class="pill bad">风控中止</span>'
+            : h.finished ? '<span class="pill ok">完成</span>' : '<span class="pill warn">未完成</span>')
+          + '</td></tr>').join('') + '</tbody></table>'
+      : '');
+
+  $('boot').style.display = 'none';
+}
+
+async function refresh() {
+  try {
+    render(await api('/api/state'));
+  } catch (error) {
+    $('boot').className = 'banner bad';
+    $('boot').textContent = '加载失败：' + error.message;
+  }
+}
+
+function collectSettings() {
+  const s = JSON.parse(JSON.stringify(STATE.settings));
+  s.unfollow.dailyCap = Number($('ufDaily').value);
+  s.unfollow.perRun = Number($('ufPerRun').value);
+  s.unfollow.freshCapDays = Number($('ufCap').value);
+  s.unfollow.enabled = $('ufEnabled').value === 'true';
+  s.unfollow.whitelist = linesToIds($('ufWhitelist').value);
+
+  s.favorites.dailyCap = Number($('favDaily').value);
+  s.favorites.perRun = Number($('favPerRun').value);
+  s.favorites.freshCapDays = Number($('favCap').value);
+  s.favorites.enabled = $('favEnabled').value === 'true';
+  s.favorites.whitelist = linesToIds($('favWhitelist').value);
+  const chosen = $('favFolder').value;
+  if (chosen) {
+    s.favorites.folderId = chosen;
+    const opt = $('favFolder').selectedOptions[0];
+    s.favorites.folderName = opt ? opt.textContent : '';
+  }
+  return s;
+}
+
+async function saveSettings() {
+  const saved = await api('/api/settings', { method: 'POST', body: JSON.stringify({ settings: collectSettings() }) });
+  STATE.settings = saved.settings;
+  return saved.settings;
+}
+
+// ------------------------------------------------------------------ preview
+//
+// Both plans are held at once. Previewing one used to overwrite the other, so
+// the unfollow plan and the favourite plan could never be seen together. Each
+// keeps the token it was displayed with, which is what makes one combined
+// button safe: the server still re-derives every plan and rejects a stale token.
+
+const PLANS = { unfollow: null, favorites: null };
+const KIND_LABEL = { unfollow: '取关', favorites: '收藏夹删除' };
+let LAST_RESULT = null;
+
+/** Show elapsed seconds on the button, so a long run does not look frozen. */
+function busy(button, label) {
+  const started = Date.now();
+  const tick = () => {
+    button.textContent = label + ' ' + Math.round((Date.now() - started) / 1000) + 's…';
+  };
+  button.disabled = true;
+  tick();
+  const timer = setInterval(tick, 1000);
+  return () => clearInterval(timer);
+}
+
+function planCard(kind, plan) {
+  const rows = plan.actions.map((a) =>
+    '<tr><td class="num">' + a.ageDays + 'd</td><td>' + esc(a.id) + '</td><td>' + esc(a.label)
+    + (a.dead ? ' <span class="pill warn">失效</span>' : '') + '</td></tr>').join('');
+
+  // The preview plans against the stored snapshot, which may be hours old. Say
+  // so, rather than letting the staleness go unnoticed.
+  const taken = plan.snapshot.fetchedAt ? new Date(plan.snapshot.fetchedAt) : null;
+  const ageHours = taken ? (Date.now() - taken.getTime()) / 3600000 : null;
+  const stale = ageHours !== null && ageHours > 12;
+
+  return '<div class="card">'
+    + '<div class="row" style="margin-bottom:8px; justify-content:space-between; align-items:center">'
+    + '<b>' + KIND_LABEL[kind] + '计划</b>'
+    + '<span class="pill">本轮 ' + plan.actionCount + ' 项 · 计划内 ' + plan.plannedTotal
+    + ' 项 · 保留 ' + plan.keepCount + ' 项</span>'
+    + '</div>'
+    + '<div class="banner" style="white-space:pre-wrap">' + esc(plan.table.trim()) + '</div>'
+    + '<div class="note">快照 ' + esc(plan.snapshot.file)
+    + (taken ? ' · 抓取于 ' + esc(taken.toLocaleString()) + '（' + ageHours.toFixed(1) + ' 小时前）' : '')
+    + '</div>'
+    + (stale
+      ? '<div class="banner warn">这份快照已经 ' + ageHours.toFixed(0) + ' 小时了。'
+        + (kind === 'unfollow'
+          ? '期间已经被取关的 UP 仍会出现在列表里——重复取关是无害的空操作，但会占掉名额。'
+          : '期间已经被删的视频仍会出现在列表里——重复删除同样是无害的。')
+        + '「每日自动运行」每次都会先重抓，所以那边不存在这个问题。</div>'
+      : '')
+    + (plan.snapshot.incomplete
+      ? '<div class="banner warn">快照不完整：只抓到 ' + plan.snapshot.fetched + ' 条，API 报 '
+        + plan.snapshot.reportedCount + ' 条。建议先重抓再执行。</div>' : '')
+    + '<div class="note">今日配额 ' + plan.quota.used + '/' + plan.quota.cap
+    + '，剩余 ' + plan.quota.remaining + '。</div>'
+    + '<div class="banner"><div>确认令牌</div><div class="token">' + esc(plan.token) + '</div>'
+    + '<div class="note">令牌由这份计划推导。改了任何设置、或快照变了，令牌都会变。</div></div>'
+    + '<div class="row"><button id="do-' + kind + '" class="primary">执行这 '
+    + plan.actionCount + ' 项</button></div>'
+    + (plan.actions.length
+      ? '<table style="margin-top:12px"><thead><tr><th class="num">关注/收藏时长</th><th>id</th><th>名称</th></tr></thead><tbody>'
+        + rows + '</tbody></table>'
+        + (plan.truncated ? '<div class="note">… 还有 ' + plan.truncated + ' 项未显示</div>' : '')
+      : '<div class="note">本轮没有要处理的项。</div>')
+    + '</div>';
+}
+
+function resultHtml() {
+  if (!LAST_RESULT) return '';
+  return LAST_RESULT.map((r) => (r.error
+    ? '<div class="banner bad">' + KIND_LABEL[r.kind] + '：' + esc(r.error) + '</div>'
+    : '<div class="banner ' + (r.failed ? 'warn' : 'ok') + '">' + KIND_LABEL[r.kind]
+      + '：成功 ' + r.ok + '，失败 ' + r.failed + (r.aborted ? '，<b>因风控中止</b>' : '')
+      + '。日志：<code>' + esc(r.logFile) + '</code>（请求 ' + r.requests + '，重试 ' + r.retries + '）</div>'
+  )).join('');
+}
+
+function renderPlans() {
+  const kinds = ['unfollow', 'favorites'].filter((kind) => PLANS[kind]);
+  const parts = [];
+
+  if (kinds.length === 0) {
+    parts.push('<div class="note">先点「预览取关计划」或「预览收藏夹计划」。'
+      + '两个都预览之后，会出现一个按钮把它们一起执行。</div>');
+  } else {
+    parts.push(kinds.map((kind) => planCard(kind, PLANS[kind])).join(''));
+
+    if (kinds.length === 2) {
+      const total = PLANS.unfollow.actionCount + PLANS.favorites.actionCount;
+      parts.push('<div class="row" style="align-items:center">'
+        + '<button id="doBoth" class="primary">两个都执行（共 ' + total + ' 项）</button>'
+        + '<span class="note" style="margin:0">先取关，再删收藏夹。两个令牌都必须仍然有效。</span></div>');
+    }
+  }
+
+  parts.push('<div id="execOut">' + resultHtml() + '</div>');
+  $('planOut').innerHTML = parts.join('');
+
+  for (const kind of kinds) {
+    const button = document.getElementById('do-' + kind);
+    if (button) button.addEventListener('click', () => runExecute([kind], button));
+  }
+  const both = $('doBoth');
+  if (both) both.addEventListener('click', () => runExecute(['unfollow', 'favorites'], both));
+}
+
+async function runExecute(kinds, button) {
+  const stopBusy = busy(button, '执行中');
+  const results = [];
+  try {
+    for (const kind of kinds) {
+      const plan = PLANS[kind];
+      if (!plan) continue;
+      try {
+        const result = await api('/api/execute', {
+          method: 'POST',
+          body: JSON.stringify({ kind, token: plan.token }),
+        });
+        results.push({ kind, ...result });
+        // A plan is single-use: the run consumed part of today's quota, so the
+        // token it was displayed with is no longer the current one.
+        PLANS[kind] = null;
+      } catch (error) {
+        results.push({ kind, error: error.message });
+      }
+    }
+  } finally {
+    stopBusy();
+  }
+
+  LAST_RESULT = results;
+  await refresh();
+  renderPlans();
+}
+
+function renderPlan(kind, plan) {
+  PLANS[kind] = plan;
+  renderPlans();
+}
+
+// ---------------------------------------------------------------- wiring
+$('saveBlob').addEventListener('click', async () => {
+  $('credMsg').textContent = '保存中…';
+  try {
+    const result = await api('/api/credentials', { method: 'POST', body: JSON.stringify({ blob: $('credBlob').value }) });
+    $('credBlob').value = '';
+    $('credMsg').textContent = '已保存（找到：' + (result.found.join(', ') || '无') + '）。值已写入本地文件，不会回显。';
+    await refresh();
+  } catch (error) {
+    $('credMsg').textContent = '失败：' + error.message;
+  }
+});
+
+// ------------------------------------------------------------- QR login
+let qrTimer = null;
+
+function stopQrPolling() {
+  if (qrTimer) { clearInterval(qrTimer); qrTimer = null; }
+}
+
+$('qrStart').addEventListener('click', async () => {
+  stopQrPolling();
+  $('qrBox').style.display = 'block';
+  $('qrImage').innerHTML = '';
+  $('qrStatus').textContent = '正在生成二维码…';
+  $('qrStart').disabled = true;
+
+  try {
+    const started = await api('/api/login/qr/start', { method: 'POST', body: '{}' });
+    $('qrImage').innerHTML = started.svg;
+    $('qrStatus').textContent = '用 B站 App 扫描这个二维码。';
+
+    let ticks = 0;
+    qrTimer = setInterval(async () => {
+      ticks += 1;
+      // The code is good for a few minutes; stop rather than poll forever.
+      if (ticks > 80) {
+        stopQrPolling();
+        $('qrStatus').textContent = '二维码超时，请重新生成。';
+        $('qrStart').disabled = false;
+        return;
+      }
+      try {
+        const result = await api('/api/login/qr/poll', { method: 'POST', body: '{}' });
+        if (result.status === 'scanned') {
+          $('qrStatus').textContent = '已扫描，请在手机上确认…';
+        } else if (result.status === 'success') {
+          stopQrPolling();
+          $('qrImage').innerHTML = '';
+          $('qrBox').style.display = 'none';
+          $('qrStart').disabled = false;
+          $('credMsg').textContent = '扫码登录成功，凭据已保存。'
+            + (result.hasCsrf ? '' : '（没拿到 bili_jct，写操作还需要手动补）');
+          await refresh();
+        } else if (result.status === 'expired') {
+          stopQrPolling();
+          $('qrStatus').textContent = '二维码已过期，请重新生成。';
+          $('qrStart').disabled = false;
+        }
+      } catch (error) {
+        stopQrPolling();
+        $('qrStatus').textContent = '出错：' + error.message;
+        $('qrStart').disabled = false;
+      }
+    }, 2500);
+  } catch (error) {
+    $('qrStatus').textContent = '生成失败：' + error.message;
+    $('qrStart').disabled = false;
+  }
+});
+
+$('clearCred').addEventListener('click', async () => {
+  if (!confirm('确定清除本地保存的凭据？')) return;
+  await api('/api/credentials/clear', { method: 'POST', body: '{}' });
+  $('credMsg').textContent = '已清除。';
+  await refresh();
+});
+
+$('verifyCred').addEventListener('click', async () => {
+  $('credMsg').textContent = '验证中…';
+  try {
+    const r = await api('/api/verify', { method: 'POST', body: '{}' });
+    $('credMsg').innerHTML = '登录有效：<b>' + esc(r.nav.uname) + '</b> (mid ' + r.nav.mid + ') · 关注 '
+      + r.stat.following + ' · 粉丝 ' + r.stat.follower;
+  } catch (error) {
+    $('credMsg').textContent = '验证失败：' + error.message;
+  }
+});
+
+$('saveUf').addEventListener('click', async () => { await saveSettings(); await refresh(); });$('saveFav').addEventListener('click', async () => { await saveSettings(); await refresh(); });
+
+$('bgToggle').addEventListener('click', () => {
+  localStorage.setItem(BG_KEY, localStorage.getItem(BG_KEY) === 'off' ? 'on' : 'off');
+  applyBackground();
+});
+
+// ---- background crop picker -------------------------------------------------
+// The crop frame is fixed at 16:9 (that is what a screen background is) and the
+// user chooses two things: which part of the picture sits in it, and how far in
+// to zoom. Whatever the frame shows is what gets saved, so it is WYSIWYG.
+
+const CROP = { bitmap: null, scale: 1, min: 1, ox: 0, oy: 0, ctx: null };
+let cropPending = null;
+
+function cropFrame() {
+  const view = $('cropView');
+  return { w: view.width, h: view.height };
+}
+
+function cropClamp() {
+  const { w, h } = cropFrame();
+  // Never let an edge of the picture pull inside the frame, or a gap would show.
+  CROP.ox = Math.min(0, Math.max(w - CROP.bitmap.width * CROP.scale, CROP.ox));
+  CROP.oy = Math.min(0, Math.max(h - CROP.bitmap.height * CROP.scale, CROP.oy));
+}
+
+function cropDraw() {
+  if (!CROP.bitmap || !CROP.ctx) return;
+  const { w, h } = cropFrame();
+  cropClamp();
+  CROP.ctx.imageSmoothingQuality = 'high';
+  CROP.ctx.clearRect(0, 0, w, h);
+  CROP.ctx.drawImage(
+    CROP.bitmap, CROP.ox, CROP.oy,
+    CROP.bitmap.width * CROP.scale, CROP.bitmap.height * CROP.scale,
+  );
+}
+
+/** Zoom while keeping whatever sits under the centre of the frame in place. */
+function cropZoomTo(next) {
+  const { w, h } = cropFrame();
+  const previous = CROP.scale;
+  CROP.scale = Math.max(CROP.min, Math.min(CROP.min * 4, next));
+  const cx = (w / 2 - CROP.ox) / previous;
+  const cy = (h / 2 - CROP.oy) / previous;
+  CROP.ox = w / 2 - cx * CROP.scale;
+  CROP.oy = h / 2 - cy * CROP.scale;
+  cropDraw();
+}
+
+function cropClose() {
+  $('cropModal').hidden = true;
+  $('cropView').classList.remove('dragging');
+  CROP.ctx = null;
+}
+
+/** Open the picker and resolve with the cropped JPEG, or reject if cancelled. */
+async function pickCrop(file) {
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch {
+    throw new Error('这个文件不是浏览器能读的图片');
+  }
+
+  CROP.bitmap = bitmap;
+  CROP.ctx = $('cropView').getContext('2d');
+  const { w, h } = cropFrame();
+  // Fully zoomed out to begin with: the whole picture, cropped only as much as
+  // the 16:9 frame forces.
+  CROP.min = Math.max(w / bitmap.width, h / bitmap.height);
+  CROP.scale = CROP.min;
+  CROP.ox = (w - bitmap.width * CROP.min) / 2;
+  CROP.oy = (h - bitmap.height * CROP.min) / 2;
+
+  $('cropZoom').value = '1';
+  const note = $('cropNote');
+  note.textContent = '原图 ' + bitmap.width + '×' + bitmap.height;
+  note.classList.remove('bad');
+  $('cropModal').hidden = false;
+  cropDraw();
+
+  return new Promise((resolve, reject) => { cropPending = { resolve, reject }; });
+}
+
+$('cropZoom').addEventListener('input', (event) => {
+  if (!CROP.bitmap) return;
+  cropZoomTo(CROP.min * Number(event.target.value));
+});
+
+(() => {
+  const view = $('cropView');
+  let drag = null;
+
+  view.addEventListener('pointerdown', (event) => {
+    if (!CROP.bitmap) return;
+    drag = { x: event.clientX, y: event.clientY };
+    view.classList.add('dragging');
+    view.setPointerCapture(event.pointerId);
+  });
+
+  view.addEventListener('pointermove', (event) => {
+    if (!drag) return;
+    // The canvas is displayed smaller than its 1280x720 backing store, so mouse
+    // pixels have to be converted before they can move the picture.
+    const ratio = view.width / view.getBoundingClientRect().width;
+    CROP.ox += (event.clientX - drag.x) * ratio;
+    CROP.oy += (event.clientY - drag.y) * ratio;
+    drag = { x: event.clientX, y: event.clientY };
+    cropDraw();
+  });
+
+  const stop = (event) => {
+    if (!drag) return;
+    drag = null;
+    view.classList.remove('dragging');
+    if (view.hasPointerCapture(event.pointerId)) view.releasePointerCapture(event.pointerId);
+  };
+  view.addEventListener('pointerup', stop);
+  view.addEventListener('pointercancel', stop);
+})();
+
+$('cropCancel').addEventListener('click', () => {
+  const pending = cropPending;
+  cropPending = null;
+  if (CROP.bitmap && CROP.bitmap.close) CROP.bitmap.close();
+  CROP.bitmap = null;
+  cropClose();
+  if (pending) pending.reject(new Error('已取消'));
+});
+
+$('cropApply').addEventListener('click', () => {
+  const pending = cropPending;
+  cropPending = null;
+  if (!pending || !CROP.bitmap) return;
+
+  const { w, h } = cropFrame();
+  const source = {
+    x: -CROP.ox / CROP.scale, y: -CROP.oy / CROP.scale,
+    w: w / CROP.scale, h: h / CROP.scale,
+  };
+  const bitmap = CROP.bitmap;
+  CROP.bitmap = null;
+  cropClose();
+
+  // Save at 1080p: plenty for any screen, and still a small upload.
+  const out = document.createElement('canvas');
+  out.width = 1920;
+  out.height = 1080;
+  const ctx = out.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bitmap, source.x, source.y, source.w, source.h, 0, 0, out.width, out.height);
+  if (bitmap.close) bitmap.close();
+
+  out.toBlob((blob) => {
+    if (blob) pending.resolve(blob);
+    else pending.reject(new Error('浏览器无法编码这张图片'));
+  }, 'image/jpeg', 0.9);
+});
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+$('bgFile').addEventListener('change', async (event) => {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = ''; // so picking the same file twice still fires
+  if (!file) return;
+
+  const label = $('bgFileLabel');
+  try {
+    const blob = await pickCrop(file);
+    label.textContent = '上传中…';
+    const data = await blobToBase64(blob);
+    const result = await api('/api/background', {
+      method: 'POST',
+      body: JSON.stringify({ data, ext: 'jpg' }),
+    });
+    localStorage.setItem(BG_KEY, 'on');
+    await refresh();
+    label.textContent = '已使用 ' + Math.round(result.bytes / 1024) + ' KB';
+    setTimeout(() => { label.textContent = '上传背景'; }, 3000);
+  } catch (error) {
+    label.textContent = '上传背景';
+    if (error.message !== '已取消') alert('上传失败：' + error.message);
+  }
+});
+
+$('bgReset').addEventListener('click', async () => {
+  if (!confirm('删掉自己上传的背景，恢复内置那张？')) return;
+  try {
+    await api('/api/background/clear', { method: 'POST', body: '{}' });
+    await refresh();
+  } catch (error) {
+    alert('恢复失败：' + error.message);
+  }
+});
+
+// Previewing one plan deliberately leaves the other in place, so both can be
+// reviewed before either is executed. Each keeps its own token, and a token that
+// went stale while you were looking fails loudly at execution rather than
+// silently running a plan you did not see.
+async function preview(kind) {
+  await saveSettings();
+  $('planOut').innerHTML = '<div class="note">计算中…</div>';
+  try {
+    renderPlan(kind, await api('/api/plan?kind=' + kind));
+  } catch (error) {
+    $('planOut').innerHTML = '<div class="banner bad">' + esc(error.message) + '</div>';
+  }
+}
+
+$('planUf').addEventListener('click', () => preview('unfollow'));
+$('planFav').addEventListener('click', () => preview('favorites'));
+
+$('refreshFolders').addEventListener('click', async () => {
+  $('favSnap').textContent = '正在从 B站 拉取收藏夹列表…';
+  try {
+    const r = await api('/api/folders/refresh', { method: 'POST', body: '{}' });
+    STATE.favorites.folders = r.folders;
+    $('favFolder').innerHTML = r.folders.map((f) =>
+      '<option value="' + esc(f.mediaId) + '">' + esc(f.title) + ' (' + f.count + ')'
+      + (f.isDefault ? ' [默认]' : '') + '</option>').join('');
+    $('favSnap').textContent = '已获取 ' + r.folders.length + ' 个收藏夹。选定后记得「保存收藏夹设置」。';
+  } catch (error) {
+    $('favSnap').textContent = '失败：' + error.message;
+  }
+});
+
+$('installTask').addEventListener('click', async () => {
+  if (!confirm('安装每日自动任务？安装后它每天无人值守地执行一次，不再需要确认令牌。')) return;
+  try {
+    await api('/api/schedule', { method: 'POST', body: JSON.stringify({ action: 'install', time: $('taskTime').value }) });
+    await refresh();
+  } catch (error) {
+    alert('安装失败：' + error.message);
+  }
+});
+
+$('removeTask').addEventListener('click', async () => {
+  if (!confirm('删除每日自动任务？')) return;
+  await api('/api/schedule', { method: 'POST', body: JSON.stringify({ action: 'remove' }) });
+  await refresh();
+});
+
+refresh();
+</script>
+</body>
+</html>
